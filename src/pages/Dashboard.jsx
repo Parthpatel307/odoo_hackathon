@@ -1,3 +1,4 @@
+import AIInsights from '../components/dashboard/AIInsights'
 import { useEffect, useState } from 'react'
 import {
   Truck,
@@ -110,6 +111,10 @@ function Dashboard() {
           }
           icon={Wrench}
         />
+      </div>
+
+      <div className="mt-6">
+        <AIInsights />
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-3">

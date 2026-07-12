@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -7,15 +7,22 @@ import {
   Truck,
   User,
   Sparkles,
+  ShieldCheck,
+  Fuel,
+  IndianRupee,
+  Gauge,
+  BrainCircuit,
+  CircleCheck,
+  AlertTriangle,
 } from 'lucide-react'
 
 import {
   addTrip,
-  getAvailableVehicles,
-  getAvailableDrivers,
   updateVehicleStatus,
   updateDriverStatus,
 } from '../services/tripService'
+
+import { runAutopilot } from '../services/autopilotService'
 
 function CreateTrip() {
   const navigate = useNavigate()
@@ -28,29 +35,10 @@ function CreateTrip() {
     revenue: '',
   })
 
-  const [vehicles, setVehicles] = useState([])
-  const [drivers, setDrivers] = useState([])
-
-  const [selectedVehicle, setSelectedVehicle] = useState('')
-  const [selectedDriver, setSelectedDriver] = useState('')
-
+  const [autopilotResult, setAutopilotResult] = useState(null)
+  const [runningAutopilot, setRunningAutopilot] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [findingMatch, setFindingMatch] = useState(false)
   const [error, setError] = useState('')
-  const [recommendationFound, setRecommendationFound] = useState(false)
-
-  useEffect(() => {
-    loadDrivers()
-  }, [])
-
-  async function loadDrivers() {
-    try {
-      const data = await getAvailableDrivers()
-      setDrivers(data || [])
-    } catch (err) {
-      console.error('Error loading drivers:', err)
-    }
-  }
 
   function handleChange(event) {
     const { name, value } = event.target
@@ -60,55 +48,37 @@ function CreateTrip() {
       [name]: value,
     }))
 
-    if (name === 'cargo_weight') {
-      setRecommendationFound(false)
-      setSelectedVehicle('')
-      setSelectedDriver('')
-    }
+    setAutopilotResult(null)
   }
 
-  async function handleSmartDispatch() {
+  async function handleRunAutopilot() {
     try {
       setError('')
+      setAutopilotResult(null)
 
-      if (!formData.cargo_weight) {
-        setError('Please enter cargo weight first.')
-        return
-      }
-
-      setFindingMatch(true)
-
-      const vehicleData = await getAvailableVehicles(
-        Number(formData.cargo_weight)
-      )
-
-      const driverData = await getAvailableDrivers()
-
-      setVehicles(vehicleData || [])
-      setDrivers(driverData || [])
-
-      if (!vehicleData || vehicleData.length === 0) {
+      if (
+        !formData.source ||
+        !formData.destination ||
+        !formData.cargo_weight ||
+        !formData.planned_distance ||
+        !formData.revenue
+      ) {
         setError(
-          'No available vehicle can carry this cargo weight.'
+          'Please fill all trip details before running Autopilot.'
         )
-        setRecommendationFound(false)
         return
       }
 
-      if (!driverData || driverData.length === 0) {
-        setError('No available driver found.')
-        setRecommendationFound(false)
-        return
-      }
+      setRunningAutopilot(true)
 
-      setSelectedVehicle(vehicleData[0].id)
-      setSelectedDriver(driverData[0].id)
-      setRecommendationFound(true)
+      const result = await runAutopilot(formData)
+
+      setAutopilotResult(result)
     } catch (err) {
-      console.error('Smart Dispatch Error:', err)
+      console.error('Autopilot Error:', err)
       setError(err.message)
     } finally {
-      setFindingMatch(false)
+      setRunningAutopilot(false)
     }
   }
 
@@ -118,31 +88,33 @@ function CreateTrip() {
     try {
       setError('')
 
-      if (
-        !formData.source ||
-        !formData.destination ||
-        !formData.cargo_weight ||
-        !formData.planned_distance ||
-        !formData.revenue
-      ) {
-        setError('Please fill all trip details.')
+      if (!autopilotResult) {
+        setError(
+          'Please run TransitOps Autopilot before dispatching the trip.'
+        )
         return
       }
 
-      if (!selectedVehicle || !selectedDriver) {
+      if (autopilotResult.decision === 'HIGH RISK') {
         setError(
-          'Please use Smart Dispatch to select a vehicle and driver.'
+          'This trip is marked as HIGH RISK and cannot be automatically dispatched.'
         )
         return
       }
 
       setLoading(true)
 
+      const selectedVehicle =
+        autopilotResult.recommendedVehicle
+
+      const selectedDriver =
+        autopilotResult.recommendedDriver
+
       const newTrip = {
         source: formData.source,
         destination: formData.destination,
-        vehicle_id: selectedVehicle,
-        driver_id: selectedDriver,
+        vehicle_id: selectedVehicle.id,
+        driver_id: selectedDriver.id,
         cargo_weight: Number(formData.cargo_weight),
         planned_distance: Number(formData.planned_distance),
         revenue: Number(formData.revenue),
@@ -152,35 +124,48 @@ function CreateTrip() {
       await addTrip(newTrip)
 
       await updateVehicleStatus(
-        selectedVehicle,
+        selectedVehicle.id,
         'On Trip'
       )
 
       await updateDriverStatus(
-        selectedDriver,
+        selectedDriver.id,
         'On Trip'
       )
 
       navigate('/trips')
     } catch (err) {
-      console.error('Error creating trip:', err)
+      console.error('Error dispatching trip:', err)
       setError(err.message)
     } finally {
       setLoading(false)
     }
   }
 
-  const recommendedVehicle = vehicles.find(
-    (vehicle) => vehicle.id === selectedVehicle
-  )
+  function getDecisionStyle(decision) {
+    if (decision === 'RECOMMENDED') {
+      return 'border-green-900/50 bg-green-950/20 text-green-400'
+    }
 
-  const recommendedDriver = drivers.find(
-    (driver) => driver.id === selectedDriver
-  )
+    if (decision === 'REVIEW REQUIRED') {
+      return 'border-yellow-900/50 bg-yellow-950/20 text-yellow-400'
+    }
+
+    return 'border-red-900/50 bg-red-950/20 text-red-400'
+  }
+
+  function getDecisionIcon(decision) {
+    if (decision === 'RECOMMENDED') {
+      return CircleCheck
+    }
+
+    return AlertTriangle
+  }
 
   return (
     <div>
       <button
+        type="button"
         onClick={() => navigate('/trips')}
         className="mb-6 flex items-center gap-2 text-slate-400 transition hover:text-white"
       >
@@ -190,11 +175,11 @@ function CreateTrip() {
 
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white">
-          Create New Trip
+          TransitOps Autopilot
         </h1>
 
         <p className="mt-2 text-slate-400">
-          Create a trip and use Smart Dispatch to assign the best vehicle and driver
+          Intelligent fleet decision engine for optimized trip dispatch
         </p>
       </div>
 
@@ -211,7 +196,7 @@ function CreateTrip() {
           </h2>
 
           <p className="mt-1 text-sm text-slate-400">
-            Enter the delivery and cargo details
+            Enter trip details for intelligent analysis
           </p>
 
           <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
@@ -229,6 +214,7 @@ function CreateTrip() {
                   value={formData.source}
                   onChange={handleChange}
                   placeholder="Ahmedabad"
+                  required
                   className="w-full rounded-lg border border-slate-700 bg-slate-950 py-3 pl-11 pr-4 text-white outline-none focus:border-blue-500"
                 />
               </div>
@@ -248,6 +234,7 @@ function CreateTrip() {
                   value={formData.destination}
                   onChange={handleChange}
                   placeholder="Surat"
+                  required
                   className="w-full rounded-lg border border-slate-700 bg-slate-950 py-3 pl-11 pr-4 text-white outline-none focus:border-blue-500"
                 />
               </div>
@@ -268,6 +255,7 @@ function CreateTrip() {
                   onChange={handleChange}
                   placeholder="1500"
                   min="1"
+                  required
                   className="w-full rounded-lg border border-slate-700 bg-slate-950 py-3 pl-11 pr-4 text-white outline-none focus:border-blue-500"
                 />
               </div>
@@ -285,6 +273,7 @@ function CreateTrip() {
                 onChange={handleChange}
                 placeholder="270"
                 min="1"
+                required
                 className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-blue-500"
               />
             </div>
@@ -300,93 +289,217 @@ function CreateTrip() {
                 value={formData.revenue}
                 onChange={handleChange}
                 placeholder="25000"
-                min="0"
+                min="1"
+                required
                 className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-blue-500"
               />
             </div>
           </div>
         </div>
 
-        <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900 p-6">
+        <div className="mt-6 rounded-xl border border-blue-900/50 bg-slate-900 p-6">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
             <div>
               <h2 className="flex items-center gap-2 text-xl font-semibold text-white">
-                <Sparkles className="h-5 w-5 text-blue-400" />
-                Smart Dispatch
+                <BrainCircuit className="h-6 w-6 text-blue-400" />
+                Autopilot Decision Engine
               </h2>
 
               <p className="mt-1 text-sm text-slate-400">
-                Automatically find the best available vehicle and driver
+                Analyze safety, capacity, operating cost and profitability
               </p>
             </div>
 
             <button
               type="button"
-              onClick={handleSmartDispatch}
-              disabled={findingMatch}
-              className="rounded-lg bg-blue-600 px-5 py-3 font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
+              onClick={handleRunAutopilot}
+              disabled={runningAutopilot}
+              className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-3 font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {findingMatch
-                ? 'Finding Best Match...'
-                : 'Find Best Match'}
+              <Sparkles className="h-5 w-5" />
+
+              {runningAutopilot
+                ? 'Analyzing Trip...'
+                : 'Run Autopilot'}
             </button>
           </div>
 
-          {recommendationFound && (
-            <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
-              <div className="rounded-xl border border-blue-900 bg-blue-950/20 p-5">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-lg bg-blue-600/20 p-3">
-                    <Truck className="h-6 w-6 text-blue-400" />
+          {autopilotResult && (() => {
+            const DecisionIcon = getDecisionIcon(
+              autopilotResult.decision
+            )
+
+            return (
+              <div className="mt-6">
+                <div
+                  className={`rounded-xl border p-5 ${getDecisionStyle(
+                    autopilotResult.decision
+                  )}`}
+                >
+                  <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+                    <div className="flex items-center gap-3">
+                      <DecisionIcon className="h-7 w-7" />
+
+                      <div>
+                        <p className="text-sm opacity-80">
+                          AUTOPILOT DECISION
+                        </p>
+
+                        <h3 className="text-2xl font-bold">
+                          {autopilotResult.decision}
+                        </h3>
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-sm opacity-80">
+                        Autopilot Score
+                      </p>
+
+                      <p className="text-3xl font-bold">
+                        {autopilotResult.autopilotScore}
+                        <span className="text-base font-normal">
+                          /100
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2">
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-5">
+                    <div className="flex items-center gap-3">
+                      <Truck className="h-6 w-6 text-blue-400" />
+
+                      <div>
+                        <p className="text-sm text-slate-400">
+                          Recommended Vehicle
+                        </p>
+
+                        <h3 className="font-semibold text-white">
+                          {
+                            autopilotResult.recommendedVehicle
+                              .vehicle_name
+                          }
+                        </h3>
+
+                        <p className="text-sm text-slate-400">
+                          {
+                            autopilotResult.recommendedVehicle
+                              .registration_number
+                          }
+                        </p>
+                      </div>
+                    </div>
                   </div>
 
-                  <div>
-                    <p className="text-sm text-slate-400">
-                      Recommended Vehicle
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-5">
+                    <div className="flex items-center gap-3">
+                      <User className="h-6 w-6 text-blue-400" />
+
+                      <div>
+                        <p className="text-sm text-slate-400">
+                          Recommended Driver
+                        </p>
+
+                        <h3 className="font-semibold text-white">
+                          {
+                            autopilotResult.recommendedDriver
+                              .name
+                          }
+                        </h3>
+
+                        <p className="text-sm text-slate-400">
+                          Safety Score:{' '}
+                          {autopilotResult.analysis.safetyScore}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-4">
+                    <Gauge className="h-5 w-5 text-blue-400" />
+
+                    <p className="mt-3 text-sm text-slate-400">
+                      Capacity Usage
                     </p>
 
-                    <h3 className="font-semibold text-white">
-                      {recommendedVehicle?.vehicle_name}
-                    </h3>
+                    <p className="mt-1 text-xl font-bold text-white">
+                      {autopilotResult.analysis.capacityUtilization}%
+                    </p>
+                  </div>
 
-                    <p className="text-sm text-slate-400">
-                      {recommendedVehicle?.registration_number}
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-4">
+                    <Fuel className="h-5 w-5 text-blue-400" />
+
+                    <p className="mt-3 text-sm text-slate-400">
+                      Estimated Cost
+                    </p>
+
+                    <p className="mt-1 text-xl font-bold text-white">
+                      ₹
+                      {autopilotResult.analysis.estimatedTotalCost.toLocaleString(
+                        'en-IN'
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-4">
+                    <IndianRupee className="h-5 w-5 text-green-400" />
+
+                    <p className="mt-3 text-sm text-slate-400">
+                      Expected Profit
+                    </p>
+
+                    <p className="mt-1 text-xl font-bold text-green-400">
+                      ₹
+                      {autopilotResult.analysis.expectedProfit.toLocaleString(
+                        'en-IN'
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-4">
+                    <ShieldCheck className="h-5 w-5 text-blue-400" />
+
+                    <p className="mt-3 text-sm text-slate-400">
+                      Trip Risk
+                    </p>
+
+                    <p className="mt-1 text-xl font-bold text-white">
+                      {autopilotResult.tripRiskScore}%
                     </p>
                   </div>
                 </div>
 
-                <p className="mt-4 text-sm text-slate-300">
-                  Capacity: {recommendedVehicle?.max_load_capacity} kg
-                </p>
-              </div>
+                <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/30 p-5">
+                  <h3 className="flex items-center gap-2 font-semibold text-white">
+                    <BrainCircuit className="h-5 w-5 text-blue-400" />
+                    Explainable Decision Analysis
+                  </h3>
 
-              <div className="rounded-xl border border-blue-900 bg-blue-950/20 p-5">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-lg bg-blue-600/20 p-3">
-                    <User className="h-6 w-6 text-blue-400" />
-                  </div>
+                  <div className="mt-4 space-y-3">
+                    {autopilotResult.explanation.map(
+                      (reason, index) => (
+                        <div
+                          key={`${reason}-${index}`}
+                          className="flex items-start gap-3"
+                        >
+                          <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" />
 
-                  <div>
-                    <p className="text-sm text-slate-400">
-                      Recommended Driver
-                    </p>
-
-                    <h3 className="font-semibold text-white">
-                      {recommendedDriver?.name}
-                    </h3>
-
-                    <p className="text-sm text-slate-400">
-                      {recommendedDriver?.license_number}
-                    </p>
+                          <p className="text-sm leading-6 text-slate-400">
+                            {reason}
+                          </p>
+                        </div>
+                      )
+                    )}
                   </div>
                 </div>
-
-                <p className="mt-4 text-sm text-slate-300">
-                  Safety Score: {recommendedDriver?.safety_score}
-                </p>
               </div>
-            </div>
-          )}
+            )
+          })()}
         </div>
 
         <div className="mt-6 flex justify-end gap-3">
@@ -400,10 +513,12 @@ function CreateTrip() {
 
           <button
             type="submit"
-            disabled={loading}
-            className="rounded-lg bg-blue-600 px-5 py-3 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            disabled={loading || !autopilotResult}
+            className="rounded-lg bg-green-600 px-5 py-3 font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {loading ? 'Creating Trip...' : 'Create Trip'}
+            {loading
+              ? 'Dispatching Trip...'
+              : 'Approve & Dispatch Trip'}
           </button>
         </div>
       </form>
