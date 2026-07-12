@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import {
   BarChart,
   Bar,
@@ -8,17 +9,53 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 
-const data = [
-  { name: 'Mon', trips: 12 },
-  { name: 'Tue', trips: 18 },
-  { name: 'Wed', trips: 15 },
-  { name: 'Thu', trips: 22 },
-  { name: 'Fri', trips: 28 },
-  { name: 'Sat', trips: 19 },
-  { name: 'Sun', trips: 14 },
-]
+import { getWeeklyTripActivity } from '../../services/dashboardService'
 
 function FleetChart() {
+  const [data, setData] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    loadWeeklyTripActivity()
+  }, [])
+
+  async function loadWeeklyTripActivity() {
+    try {
+      setLoading(true)
+      setError('')
+
+      const weeklyData = await getWeeklyTripActivity()
+
+      setData(weeklyData || [])
+    } catch (err) {
+      console.error('Error loading weekly trip activity:', err)
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
+        <div className="flex h-72 items-center justify-center text-slate-400">
+          Loading weekly trip activity...
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-xl border border-red-900 bg-red-950/30 p-5">
+        <p className="text-red-400">
+          Error loading chart: {error}
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
       <div className="mb-6">
@@ -51,6 +88,7 @@ function FleetChart() {
               stroke="#64748b"
               tickLine={false}
               axisLine={false}
+              allowDecimals={false}
             />
 
             <Tooltip

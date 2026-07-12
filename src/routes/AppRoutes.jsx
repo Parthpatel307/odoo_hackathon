@@ -8,8 +8,11 @@ import Drivers from '../pages/Drivers'
 import Trips from '../pages/Trips'
 import CreateTrip from '../pages/CreateTrip'
 import Maintenance from '../pages/Maintenance'
+import ScheduleMaintenance from '../pages/ScheduleMaintenance'
 import Expenses from '../pages/Expenses'
 import NotFound from '../pages/NotFound'
+import AddExpense from '../pages/AddExpense'
+
 
 function AppRoutes() {
   return (
@@ -22,7 +25,9 @@ function AppRoutes() {
           <Route path="/trips" element={<Trips />} />
           <Route path="/trips/create" element={<CreateTrip />} />
           <Route path="/maintenance" element={<Maintenance />} />
+          <Route path="/maintenance/create" element={<ScheduleMaintenance />} />
           <Route path="/expenses" element={<Expenses />} />
+          <Route path="/expenses/create" element={<AddExpense />} />
         </Route>
 
         <Route path="*" element={<NotFound />} />
